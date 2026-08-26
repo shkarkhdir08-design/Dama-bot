@@ -1,3 +1,20 @@
+import os
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is live!")
+
+def run_web_server():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+Thread(target=run_web_server, daemon=True).start()
+
 import io
 import discord
 from discord.ext import commands
@@ -195,4 +212,5 @@ async def m(ctx, start_r: int, start_c: int, end_r: int, end_c: int):
     else:
         await ctx.send(f"❌ **Invalid Move:** {msg}")
 
-bot.run(''YOUR_BOT_TOKEN_HERE")
+bot.run(os.getenv(''DISCORD_TOKEN"))
+
