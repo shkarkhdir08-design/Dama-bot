@@ -2,7 +2,7 @@ import os
 import io
 import discord
 from discord.ext import commands
-from discord.ui import View, Select, Button
+from discord.ui import View, Button
 from PIL import Image, ImageDraw
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -38,8 +38,8 @@ class DamaGame:
         self.p2 = player_black
         self.turn = player_white
         self.board = self.create_board()
+        self.cursor = [5, 0]  # [row, col]
         self.selected_from = None
-        self.selected_to = None
 
     def create_board(self):
         board = [[EMPTY for _ in range(8)] for _ in range(8)]
@@ -62,7 +62,6 @@ class DamaGame:
         dc = ec - sc
         abs_dr, abs_dc = abs(dr), abs(dc)
 
-        # Basic movement validation
         if p in (WHITE, BLACK):
             forward = -1 if color == WHITE else 1
             if abs_dr + abs_dc == 1:
@@ -115,9 +114,9 @@ class DamaGame:
         elif self.board[r][c] == BLACK and r == 7:
             self.board[r][c] = BLACK_KING
 
-def render_board_image(board):
-    cell_size = 60
-    margin = 30
+def render_board_image(game: DamaGame):
+    cell_size = 120  # High Definition resolution
+    margin = 40
     img_size = cell_size * 8 + margin
     img = Image.new("RGB", (img_size, img_size), "#1E1E2E")
     draw = ImageDraw.Draw(img)
@@ -131,93 +130,90 @@ def render_board_image(board):
             color = "#D18B47" if (r + c) % 2 == 1 else "#FFCE9E"
             draw.rectangle([x1, y1, x2, y2], fill=color)
 
-            piece = board[r][c]
-            if piece != EMPTY:
-                px1, py1 = x1 + 6, y1 + 6
-                px2, py2 = x2 - 6, y2 - 6
-                pcolor = "#FFFFFF" if piece in (WHITE, WHITE_KING) else "#E74C3C"
-                draw.ellipse([px1, py1, px2, py2], fill=pcolor, outline="#000000", width=2)
-                if piece in (WHITE_KING, BLACK_KING):
-                    draw.ellipse([px1+12, py1+12, px2-12, py2-12], fill="#F1C40F")
+            # Selected piece highlight (Green)
+            if game.selected_from and game.selected_from == (r, c):
+                draw.rectangle([x1+4, y1+4, x2-4, y2-4], outline="#2ECC71", width=8)
 
-    for i in range(8):
-        draw.text((margin / 2 - 4, i * cell_size + 20), str(i), fill="#FFFFFF")
-        draw.text((margin + i * cell_size + 25, img_size - 20), str(i), fill="#FFFFFF")
+            # Cursor highlight (Yellow box)
+            if game.cursor == [r, c]:
+                draw.rectangle([x1+8, y1+8, x2-8, y2-8], outline="#F1C40F", width=6)
+
+            piece = game.board[r][c]
+            if piece != EMPTY:
+                px1, py1 = x1 + 12, y1 + 12
+                px2, py2 = x2 - 12, y2 - 12
+                pcolor = "#FFFFFF" if piece in (WHITE, WHITE_KING) else "#E74C3C"
+                draw.ellipse([px1, py1, px2, py2], fill=pcolor, outline="#000000", width=4)
+                if piece in (WHITE_KING, BLACK_KING):
+                    draw.ellipse([px1+24, py1+24, px2-24, py2-24], fill="#F1C40F")
 
     img_bytes = io.BytesIO()
     img.save(img_bytes, format='PNG')
     img_bytes.seek(0)
     return img_bytes
 
-active_games = {}
-
-class DamaView(View):
+class DPadView(View):
     def __init__(self, game: DamaGame):
         super().__init__(timeout=None)
         self.game = game
-        self.update_selects()
 
-    def update_selects(self):
-        self.clear_items()
-        
-        # Piece selection menu
+    async def update_board_message(self, interaction: discord.Interaction, notice: str = ""):
+        image_bytes = render_board_image(self.game)
+        file = discord.File(fp=image_bytes, filename="dama_board.png")
+        sel_text = f"\n📌 **Selected Piece:** Row {self.game.selected_from[0]}, Col {self.game.selected_from[1]}" if self.game.selected_from else ""
+        content = f"**Current Turn:** {self.game.turn.mention}{sel_text}\n📍 **Cursor Position:** Row {self.game.cursor[0]}, Col {self.game.cursor[1]} {notice}"
+        await interaction.response.edit_message(content=content, attachments=[file], view=self)
+
+    async def move_cursor(self, interaction: discord.Interaction, dr: int, dc: int):
+        if interaction.user != self.game.turn:
+            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
+        self.game.cursor[0] = max(0, min(7, self.game.cursor[0] + dr))
+        self.game.cursor[1] = max(0, min(7, self.game.cursor[1] + dc))
+        await self.update_board_message(interaction)
+
+    @discord.ui.button(label="⬆️ Up", style=discord.ButtonStyle.primary, row=0)
+    async def up_btn(self, interaction: discord.Interaction, button: Button):
+        await self.move_cursor(interaction, -1, 0)
+
+    @discord.ui.button(label="⬅️ Left", style=discord.ButtonStyle.primary, row=1)
+    async def left_btn(self, interaction: discord.Interaction, button: Button):
+        await self.move_cursor(interaction, 0, -1)
+
+    @discord.ui.button(label="➡️ Right", style=discord.ButtonStyle.primary, row=1)
+    async def right_btn(self, interaction: discord.Interaction, button: Button):
+        await self.move_cursor(interaction, 0, 1)
+
+    @discord.ui.button(label="⬇️ Down", style=discord.ButtonStyle.primary, row=2)
+    async def down_btn(self, interaction: discord.Interaction, button: Button):
+        await self.move_cursor(interaction, 1, 0)
+
+    @discord.ui.button(label="🎯 Select Piece", style=discord.ButtonStyle.secondary, row=3)
+    async def select_btn(self, interaction: discord.Interaction, button: Button):
+        if interaction.user != self.game.turn:
+            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
+        r, c = self.game.cursor
         color = WHITE if self.game.turn == self.game.p1 else BLACK
-        valid_pieces = []
-        for r in range(8):
-            for c in range(8):
-                p = self.game.board[r][c]
-                if (color == WHITE and p in (WHITE, WHITE_KING)) or (color == BLACK and p in (BLACK, BLACK_KING)):
-                    valid_pieces.append(discord.SelectOption(label=f"Row {r}, Col {c}", value=f"{r},{c}"))
+        p = self.game.board[r][c]
+        if p == EMPTY or (color == WHITE and p not in (WHITE, WHITE_KING)) or (color == BLACK and p not in (BLACK, BLACK_KING)):
+            return await interaction.response.send_message("❌ Choose one of your own pieces!", ephemeral=True)
+        self.game.selected_from = (r, c)
+        await self.update_board_message(interaction, notice="\n✅ *Piece Selected! Now move cursor to destination and tap Confirm.*")
 
-        piece_select = Select(placeholder="1. Select Piece to Move", options=valid_pieces[:25], custom_id="piece_select")
-        piece_select.callback = self.on_piece_select
-        self.add_item(piece_select)
-
-        # Target selection menu
-        targets = [discord.SelectOption(label=f"Row {r}, Col {c}", value=f"{r},{c}") for r in range(8) for c in range(8)]
-        target_select = Select(placeholder="2. Select Destination", options=targets[:25], custom_id="target_select")
-        target_select.callback = self.on_target_select
-        self.add_item(target_select)
-
-        # Move button
-        btn = Button(label="Confirm Move", style=discord.ButtonStyle.success, custom_id="confirm_move")
-        btn.callback = self.on_confirm
-        self.add_item(btn)
-
-    async def on_piece_select(self, interaction: discord.Interaction):
+    @discord.ui.button(label="✅ Confirm Move", style=discord.ButtonStyle.success, row=3)
+    async def confirm_btn(self, interaction: discord.Interaction, button: Button):
         if interaction.user != self.game.turn:
             return await interaction.response.send_message("It's not your turn!", ephemeral=True)
-        val = interaction.data['values'][0]
-        self.game.selected_from = tuple(map(int, val.split(',')))
-        await interaction.response.send_message(f"Selected piece at Row {self.game.selected_from[0]}, Col {self.game.selected_from[1]}", ephemeral=True)
-
-    async def on_target_select(self, interaction: discord.Interaction):
-        if interaction.user != self.game.turn:
-            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
-        val = interaction.data['values'][0]
-        self.game.selected_to = tuple(map(int, val.split(',')))
-        await interaction.response.send_message(f"Selected target Row {self.game.selected_to[0]}, Col {self.game.selected_to[1]}", ephemeral=True)
-
-    async def on_confirm(self, interaction: discord.Interaction):
-        if interaction.user != self.game.turn:
-            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
-        if not self.game.selected_from or not self.game.selected_to:
-            return await interaction.response.send_message("Please select both a piece and a destination first!", ephemeral=True)
+        if not self.game.selected_from:
+            return await interaction.response.send_message("❌ Tap 'Select Piece' first!", ephemeral=True)
 
         sr, sc = self.game.selected_from
-        er, ec = self.game.selected_to
+        er, ec = self.game.cursor
         success, msg = self.game.move_piece(sr, sc, er, ec)
 
         if success:
             self.game.turn = self.game.p2 if self.game.turn == self.game.p1 else self.game.p1
             self.game.selected_from = None
-            self.game.selected_to = None
-            self.update_selects()
-            
-            image_bytes = render_board_image(self.game.board)
-            file = discord.File(fp=image_bytes, filename="dama_board.png")
-            board_msg = f"**Current Turn:** {self.game.turn.mention}"
-            await interaction.response.edit_message(content=board_msg, attachments=[file], view=self)
+            await self.update_board_message(interaction)
         else:
             await interaction.response.send_message(f"❌ **Invalid Move:** {msg}", ephemeral=True)
 
@@ -226,11 +222,10 @@ async def dama(ctx, opponent: discord.User):
     if opponent.bot:
         return await ctx.send("You cannot play against a bot!")
     game = DamaGame(ctx.author, opponent)
-    active_games[ctx.channel.id] = game
-    image_bytes = render_board_image(game.board)
+    image_bytes = render_board_image(game)
     file = discord.File(fp=image_bytes, filename="dama_board.png")
-    view = DamaView(game)
-    await ctx.send(f"🎮 **DAMA GAME STARTED** 🎮\n⚪ White: {ctx.author.mention}\n🔴 Red: {opponent.mention}\n\n**Current Turn:** {ctx.author.mention}", file=file, view=view)
+    view = DPadView(game)
+    await ctx.send(f"🎮 **DAMA GAME STARTED** 🎮\n⚪ White: {ctx.author.mention}\n🔴 Red: {opponent.mention}\n\n**Current Turn:** {ctx.author.mention}\n📍 **Cursor Position:** Row 5, Col 0", file=file, view=view)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
 
