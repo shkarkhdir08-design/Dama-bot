@@ -1,7 +1,13 @@
 import os
+import io
+import discord
+from discord.ext import commands
+from discord.ui import View, Select, Button
+from PIL import Image, ImageDraw
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# --- HEALTH CHECK FOR RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -15,203 +21,216 @@ def run_web_server():
 
 Thread(target=run_web_server, daemon=True).start()
 
-import io
-import discord
-from discord.ext import commands
-from PIL import Image, ImageDraw
+# --- DISCORD BOT SETUP ---
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- GAME CONSTANTS ---
 EMPTY = 0
 WHITE = 1
 BLACK = 2
 WHITE_KING = 3
 BLACK_KING = 4
 
-# --- GAME LOGIC ---
 class DamaGame:
     def __init__(self, player_white: discord.User, player_black: discord.User):
         self.p1 = player_white
         self.p2 = player_black
         self.turn = player_white
         self.board = self.create_board()
-        self.selected = None  # (row, col)
+        self.selected_from = None
+        self.selected_to = None
 
     def create_board(self):
         board = [[EMPTY for _ in range(8)] for _ in range(8)]
-        for r in range(1, 3):  # Black
+        for r in range(1, 3):
             for c in range(8):
                 board[r][c] = BLACK
-        for r in range(5, 7):  # White
+        for r in range(5, 7):
             for c in range(8):
                 board[r][c] = WHITE
         return board
 
-    def move_piece(self, start_r, start_c, end_r, end_c):
-        piece = self.board[start_r][start_c]
-        if piece == EMPTY:
-            return False, "No piece at starting position."
-
-        if self.turn == self.p1 and piece not in [WHITE, WHITE_KING]:
-            return False, "Not your piece!"
-        if self.turn == self.p2 and piece not in [BLACK, BLACK_KING]:
+    def move_piece(self, sr, sc, er, ec):
+        p = self.board[sr][sc]
+        color = WHITE if self.turn == self.p1 else BLACK
+        
+        if p == EMPTY or (p in (WHITE, WHITE_KING) and color != WHITE) or (p in (BLACK, BLACK_KING) and color != BLACK):
             return False, "Not your piece!"
 
-        dr = end_r - start_r
-        dc = end_c - start_c
+        dr = er - sr
+        dc = ec - sc
+        abs_dr, abs_dc = abs(dr), abs(dc)
 
-        # Orthogonal check
-        if abs(dr) > 0 and abs(dc) > 0:
-            return False, "Diagonal moves are not allowed in Dama!"
+        # Basic movement validation
+        if p in (WHITE, BLACK):
+            forward = -1 if color == WHITE else 1
+            if abs_dr + abs_dc == 1:
+                if dr == -forward:
+                    return False, "Cannot move backward!"
+                if self.board[er][ec] == EMPTY:
+                    self.board[er][ec] = p
+                    self.board[sr][sc] = EMPTY
+                    self._check_king(er, ec)
+                    return True, "Success"
+            elif (abs_dr == 2 and dc == 0) or (abs_dc == 2 and dr == 0):
+                mr, mc = (sr + er) // 2, (sc + ec) // 2
+                mid_p = self.board[mr][mc]
+                opp = (BLACK, BLACK_KING) if color == WHITE else (WHITE, WHITE_KING)
+                if mid_p in opp and self.board[er][ec] == EMPTY:
+                    self.board[er][ec] = p
+                    self.board[sr][sc] = EMPTY
+                    self.board[mr][mc] = EMPTY
+                    self._check_king(er, ec)
+                    return True, "Captured piece!"
 
-        # Step Move (1 space)
-        if abs(dr) + abs(dc) == 1:
-            if self.board[end_r][end_c] != EMPTY:
-                return False, "Target space is occupied."
-            
-            if piece == WHITE and dr > 0:
-                return False, "White standard pieces cannot move backward!"
-            if piece == BLACK and dr < 0:
-                return False, "Black standard pieces cannot move backward!"
+        elif p in (WHITE_KING, BLACK_KING):
+            if (dr == 0 or dc == 0) and self.board[er][ec] == EMPTY:
+                step_r = 0 if dr == 0 else (1 if dr > 0 else -1)
+                step_c = 0 if dc == 0 else (1 if dc > 0 else -1)
+                curr_r, curr_c = sr + step_r, sc + step_c
+                captured = []
+                while (curr_r, curr_c) != (er, ec):
+                    cp = self.board[curr_r][curr_c]
+                    if cp != EMPTY:
+                        opp = (BLACK, BLACK_KING) if color == WHITE else (WHITE, WHITE_KING)
+                        if cp in opp:
+                            captured.append((curr_r, curr_c))
+                        else:
+                            return False, "Blocked by own piece!"
+                    curr_r += step_r
+                    curr_c += step_c
+                if len(captured) <= 1:
+                    for cr, cc in captured:
+                        self.board[cr][cc] = EMPTY
+                    self.board[er][ec] = p
+                    self.board[sr][sc] = EMPTY
+                    return True, "King moved!"
 
-            self.board[end_r][end_c] = piece
-            self.board[start_r][start_c] = EMPTY
-            self.check_king(end_r, end_c)
-            self.switch_turn()
-            return True, "Moved successfully."
+        return False, "Invalid move!"
 
-        # Capture Move (2 spaces)
-        elif abs(dr) == 2 or abs(dc) == 2:
-            mid_r = start_r + dr // 2
-            mid_c = start_c + dc // 2
-            mid_piece = self.board[mid_r][mid_c]
-
-            if mid_piece == EMPTY:
-                return False, "No piece to capture."
-            if self.turn == self.p1 and mid_piece in [WHITE, WHITE_KING]:
-                return False, "Cannot capture your own piece."
-            if self.turn == self.p2 and mid_piece in [BLACK, BLACK_KING]:
-                return False, "Cannot capture your own piece."
-            if self.board[end_r][end_c] != EMPTY:
-                return False, "Target space is occupied."
-
-            self.board[end_r][end_c] = piece
-            self.board[start_r][start_c] = EMPTY
-            self.board[mid_r][mid_c] = EMPTY
-            self.check_king(end_r, end_c)
-            self.switch_turn()
-            return True, "Captured piece!"
-
-        return False, "Invalid move distance."
-
-    def check_king(self, r, c):
+    def _check_king(self, r, c):
         if self.board[r][c] == WHITE and r == 0:
             self.board[r][c] = WHITE_KING
         elif self.board[r][c] == BLACK and r == 7:
             self.board[r][c] = BLACK_KING
 
-    def switch_turn(self):
-        self.turn = self.p2 if self.turn == self.p1 else self.p1
-
-# --- IMAGE GENERATOR (PIL) ---
-def render_board_image(board, selected=None):
+def render_board_image(board):
     cell_size = 60
     margin = 30
-    img_size = cell_size * 8 + margin * 2
-    
-    img = Image.new("RGB", (img_size, img_size), "#2f3136")
+    img_size = cell_size * 8 + margin
+    img = Image.new("RGB", (img_size, img_size), "#1E1E2E")
     draw = ImageDraw.Draw(img)
 
-    # Board colors
-    light_square = "#e0c398"
-    dark_square = "#a67c52"
-
-    # Draw grid & labels
     for r in range(8):
-        # Row & Column Labels
-        draw.text((margin // 3, margin + r * cell_size + 20), str(r), fill="#ffffff")
-        draw.text((margin + r * cell_size + 25, margin // 3), str(r), fill="#ffffff")
-
         for c in range(8):
             x1 = margin + c * cell_size
-            y1 = margin + r * cell_size
+            y1 = r * cell_size
             x2 = x1 + cell_size
             y2 = y1 + cell_size
-
-            color = light_square if (r + c) % 2 == 0 else dark_square
+            color = "#D18B47" if (r + c) % 2 == 1 else "#FFCE9E"
             draw.rectangle([x1, y1, x2, y2], fill=color)
 
-            # Highlight selected square
-            if selected == (r, c):
-                draw.rectangle([x1, y1, x2, y2], outline="#3b82f6", width=4)
-
-            # Draw pieces
             piece = board[r][c]
-            p_margin = 8
-            px1, py1 = x1 + p_margin, y1 + p_margin
-            px2, py2 = x2 - p_margin, y2 - p_margin
+            if piece != EMPTY:
+                px1, py1 = x1 + 6, y1 + 6
+                px2, py2 = x2 - 6, y2 - 6
+                pcolor = "#FFFFFF" if piece in (WHITE, WHITE_KING) else "#E74C3C"
+                draw.ellipse([px1, py1, px2, py2], fill=pcolor, outline="#000000", width=2)
+                if piece in (WHITE_KING, BLACK_KING):
+                    draw.ellipse([px1+12, py1+12, px2-12, py2-12], fill="#F1C40F")
 
-            if piece in [WHITE, WHITE_KING]:
-                draw.ellipse([px1, py1, px2, py2], fill="#f8fafc", outline="#cbd5e1", width=2)
-                if piece == WHITE_KING:
-                    draw.text((x1 + 22, y1 + 18), "K", fill="#d97706")
-            elif piece in [BLACK, BLACK_KING]:
-                draw.ellipse([px1, py1, px2, py2], fill="#ef4444", outline="#b91c1c", width=2)
-                if piece == BLACK_KING:
-                    draw.text((x1 + 22, y1 + 18), "K", fill="#ffffff")
+    for i in range(8):
+        draw.text((margin / 2 - 4, i * cell_size + 20), str(i), fill="#FFFFFF")
+        draw.text((margin + i * cell_size + 25, img_size - 20), str(i), fill="#FFFFFF")
 
-    # Save image to in-memory bytes buffer
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer
-
-
-# --- BOT SETUP ---
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    img_bytes.seek(0)
+    return img_bytes
 
 active_games = {}
 
+class DamaView(View):
+    def __init__(self, game: DamaGame):
+        super().__init__(timeout=None)
+        self.game = game
+        self.update_selects()
+
+    def update_selects(self):
+        self.clear_items()
+        
+        # Piece selection menu
+        color = WHITE if self.game.turn == self.game.p1 else BLACK
+        valid_pieces = []
+        for r in range(8):
+            for c in range(8):
+                p = self.game.board[r][c]
+                if (color == WHITE and p in (WHITE, WHITE_KING)) or (color == BLACK and p in (BLACK, BLACK_KING)):
+                    valid_pieces.append(discord.SelectOption(label=f"Row {r}, Col {c}", value=f"{r},{c}"))
+
+        piece_select = Select(placeholder="1. Select Piece to Move", options=valid_pieces[:25], custom_id="piece_select")
+        piece_select.callback = self.on_piece_select
+        self.add_item(piece_select)
+
+        # Target selection menu
+        targets = [discord.SelectOption(label=f"Row {r}, Col {c}", value=f"{r},{c}") for r in range(8) for c in range(8)]
+        target_select = Select(placeholder="2. Select Destination", options=targets[:25], custom_id="target_select")
+        target_select.callback = self.on_target_select
+        self.add_item(target_select)
+
+        # Move button
+        btn = Button(label="Confirm Move", style=discord.ButtonStyle.success, custom_id="confirm_move")
+        btn.callback = self.on_confirm
+        self.add_item(btn)
+
+    async def on_piece_select(self, interaction: discord.Interaction):
+        if interaction.user != self.game.turn:
+            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
+        val = interaction.data['values'][0]
+        self.game.selected_from = tuple(map(int, val.split(',')))
+        await interaction.response.send_message(f"Selected piece at Row {self.game.selected_from[0]}, Col {self.game.selected_from[1]}", ephemeral=True)
+
+    async def on_target_select(self, interaction: discord.Interaction):
+        if interaction.user != self.game.turn:
+            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
+        val = interaction.data['values'][0]
+        self.game.selected_to = tuple(map(int, val.split(',')))
+        await interaction.response.send_message(f"Selected target Row {self.game.selected_to[0]}, Col {self.game.selected_to[1]}", ephemeral=True)
+
+    async def on_confirm(self, interaction: discord.Interaction):
+        if interaction.user != self.game.turn:
+            return await interaction.response.send_message("It's not your turn!", ephemeral=True)
+        if not self.game.selected_from or not self.game.selected_to:
+            return await interaction.response.send_message("Please select both a piece and a destination first!", ephemeral=True)
+
+        sr, sc = self.game.selected_from
+        er, ec = self.game.selected_to
+        success, msg = self.game.move_piece(sr, sc, er, ec)
+
+        if success:
+            self.game.turn = self.game.p2 if self.game.turn == self.game.p1 else self.game.p1
+            self.game.selected_from = None
+            self.game.selected_to = None
+            self.update_selects()
+            
+            image_bytes = render_board_image(self.game.board)
+            file = discord.File(fp=image_bytes, filename="dama_board.png")
+            board_msg = f"**Current Turn:** {self.game.turn.mention}"
+            await interaction.response.edit_message(content=board_msg, attachments=[file], view=self)
+        else:
+            await interaction.response.send_message(f"❌ **Invalid Move:** {msg}", ephemeral=True)
+
 @bot.command()
 async def dama(ctx, opponent: discord.User):
-    """Starts a Dama game with a mentioned user: !dama @Friend"""
-    if opponent.bot or opponent == ctx.author:
-        await ctx.send("Please challenge a valid opponent!")
-        return
-
-    game = DamaGame(player_white=ctx.author, player_black=opponent)
+    if opponent.bot:
+        return await ctx.send("You cannot play against a bot!")
+    game = DamaGame(ctx.author, opponent)
     active_games[ctx.channel.id] = game
-
     image_bytes = render_board_image(game.board)
     file = discord.File(fp=image_bytes, filename="dama_board.png")
-
-    msg = f"🎮 **DAMA GAME STARTED** 🎮\n⚪ White: {ctx.author.mention}\n🔴 Red: {opponent.mention}\n\n**Current Turn:** {game.turn.mention}"
-    await ctx.send(msg, file=file)
-
-
-@bot.command()
-async def m(ctx, start_r: int, start_c: int, end_r: int, end_c: int):
-    """Move command: !m <from_row> <from_col> <to_row> <to_col>"""
-    game = active_games.get(ctx.channel.id)
-    if not game:
-        await ctx.send("No active Dama game in this channel. Start one with `!dama @user`!")
-        return
-
-    if ctx.author != game.turn:
-        await ctx.send("It's not your turn!", delete_after=5)
-        return
-
-    success, msg = game.move_piece(start_r, start_c, end_r, end_c)
-    if success:
-        image_bytes = render_board_image(game.board)
-        file = discord.File(fp=image_bytes, filename="dama_board.png")
-        
-        board_msg = f"**Current Turn:** {game.turn.mention}\nLast action: {msg}"
-        await ctx.send(board_msg, file=file)
-    else:
-        await ctx.send(f"❌ **Invalid Move:** {msg}")
+    view = DamaView(game)
+    await ctx.send(f"🎮 **DAMA GAME STARTED** 🎮\n⚪ White: {ctx.author.mention}\n🔴 Red: {opponent.mention}\n\n**Current Turn:** {ctx.author.mention}", file=file, view=view)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
-
 
