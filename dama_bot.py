@@ -212,5 +212,6 @@ async def m(ctx, start_r: int, start_c: int, end_r: int, end_c: int):
     else:
         await ctx.send(f"❌ **Invalid Move:** {msg}")
 
-bot.run(os.getenv(''DISCORD_TOKEN"))
+bot.run(os.getenv("DISCORD_TOKEN"))
+
 
