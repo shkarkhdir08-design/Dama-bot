@@ -1,4 +1,5 @@
 discord.py
-Pillow
 google-genai
-
+Pillow
+yt-dlp
+pynacl
