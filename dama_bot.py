@@ -6,6 +6,7 @@ from discord.ui import View, Button
 from PIL import Image, ImageDraw
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from google import genai
 
 # --- HEALTH CHECK FOR RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -21,6 +22,19 @@ def run_web_server():
 
 Thread(target=run_web_server, daemon=True).start()
 
+# --- GEMINI AI SETUP ---
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+ai_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+
+SYSTEM_INSTRUCTION = (
+    "You are Mam Hassan, a friendly, casual, and witty old Kurdish uncle chatting on Discord. "
+    "Keep your messages short, casual, and conversational—just like a real person texting in chat. "
+    "Do NOT write long paragraphs or essays unless the user specifically asks a complex question. "
+    "Chat mostly in English, but naturally mix in common Kurdish words, greetings, and expressions here and there "
+    "(e.g., 'Kake', 'Brakam', 'Giyan', 'Choni', 'Bale', 'Spas', 'Wallah'). "
+    "Keep typical responses to 1-2 short sentences max."
+)
+
 # --- DISCORD BOT SETUP ---
 intents = discord.Intents.default()
 intents.message_content = True
@@ -34,12 +48,19 @@ BLACK_KING = 4
 
 class DamaGame:
     def __init__(self, player_white: discord.User, player_black: discord.User):
-        self.p1 = player_white
-        self.p2 = player_black
+        self.p1 = player_white  # White
+        self.p2 = player_black  # Red/Black
         self.turn = player_white
         self.board = self.create_board()
-        self.cursor = [5, 0]  # [row, col]
+        
+        # Dual Cursors: Player 1 starts near row 5, Player 2 starts near row 2
+        self.cursor_p1 = [5, 0]
+        self.cursor_p2 = [2, 0]
         self.selected_from = None
+
+    @property
+    def current_cursor(self):
+        return self.cursor_p1 if self.turn == self.p1 else self.cursor_p2
 
     def create_board(self):
         board = [[EMPTY for _ in range(8)] for _ in range(8)]
@@ -115,7 +136,7 @@ class DamaGame:
             self.board[r][c] = BLACK_KING
 
 def render_board_image(game: DamaGame):
-    cell_size = 120  # High Definition resolution
+    cell_size = 120
     margin = 40
     img_size = cell_size * 8 + margin
     img = Image.new("RGB", (img_size, img_size), "#1E1E2E")
@@ -130,18 +151,22 @@ def render_board_image(game: DamaGame):
             color = "#D18B47" if (r + c) % 2 == 1 else "#FFCE9E"
             draw.rectangle([x1, y1, x2, y2], fill=color)
 
-            # Selected piece highlight (Green)
+            # Highlight selected piece
             if game.selected_from and game.selected_from == (r, c):
                 draw.rectangle([x1+4, y1+4, x2-4, y2-4], outline="#2ECC71", width=8)
 
-            # Cursor highlight (Yellow box)
-            if game.cursor == [r, c]:
-                draw.rectangle([x1+8, y1+8, x2-8, y2-8], outline="#F1C40F", width=6)
+            # Draw White Player's Cursor (Cyan box)
+            if game.cursor_p1 == [r, c]:
+                draw.rectangle([x1+8, y1+8, x2-8, y2-8], outline="#00FFFF", width=6)
+
+            # Draw Red Player's Cursor (Yellow/Orange box)
+            if game.cursor_p2 == [r, c]:
+                draw.rectangle([x1+12, y1+12, x2-12, y2-12], outline="#FF9900", width=6)
 
             piece = game.board[r][c]
             if piece != EMPTY:
-                px1, py1 = x1 + 12, y1 + 12
-                px2, py2 = x2 - 12, y2 - 12
+                px1, py1 = x1 + 14, y1 + 14
+                px2, py2 = x2 - 14, y2 - 14
                 pcolor = "#FFFFFF" if piece in (WHITE, WHITE_KING) else "#E74C3C"
                 draw.ellipse([px1, py1, px2, py2], fill=pcolor, outline="#000000", width=4)
                 if piece in (WHITE_KING, BLACK_KING):
@@ -161,14 +186,16 @@ class DPadView(View):
         image_bytes = render_board_image(self.game)
         file = discord.File(fp=image_bytes, filename="dama_board.png")
         sel_text = f"\n📌 **Selected Piece:** Row {self.game.selected_from[0]}, Col {self.game.selected_from[1]}" if self.game.selected_from else ""
-        content = f"**Current Turn:** {self.game.turn.mention}{sel_text}\n📍 **Cursor Position:** Row {self.game.cursor[0]}, Col {self.game.cursor[1]} {notice}"
+        cur = self.game.current_cursor
+        content = f"**Current Turn:** {self.game.turn.mention}{sel_text}\n📍 **Your Cursor:** Row {cur[0]}, Col {cur[1]} {notice}"
         await interaction.response.edit_message(content=content, attachments=[file], view=self)
 
     async def move_cursor(self, interaction: discord.Interaction, dr: int, dc: int):
         if interaction.user != self.game.turn:
             return await interaction.response.send_message("It's not your turn!", ephemeral=True)
-        self.game.cursor[0] = max(0, min(7, self.game.cursor[0] + dr))
-        self.game.cursor[1] = max(0, min(7, self.game.cursor[1] + dc))
+        cur = self.game.current_cursor
+        cur[0] = max(0, min(7, cur[0] + dr))
+        cur[1] = max(0, min(7, cur[1] + dc))
         await self.update_board_message(interaction)
 
     @discord.ui.button(label="⬆️ Up", style=discord.ButtonStyle.primary, row=0)
@@ -191,13 +218,13 @@ class DPadView(View):
     async def select_btn(self, interaction: discord.Interaction, button: Button):
         if interaction.user != self.game.turn:
             return await interaction.response.send_message("It's not your turn!", ephemeral=True)
-        r, c = self.game.cursor
+        r, c = self.game.current_cursor
         color = WHITE if self.game.turn == self.game.p1 else BLACK
         p = self.game.board[r][c]
         if p == EMPTY or (color == WHITE and p not in (WHITE, WHITE_KING)) or (color == BLACK and p not in (BLACK, BLACK_KING)):
             return await interaction.response.send_message("❌ Choose one of your own pieces!", ephemeral=True)
         self.game.selected_from = (r, c)
-        await self.update_board_message(interaction, notice="\n✅ *Piece Selected! Now move cursor to destination and tap Confirm.*")
+        await self.update_board_message(interaction, notice="\n✅ *Piece Selected! Move cursor to target and tap Confirm.*")
 
     @discord.ui.button(label="✅ Confirm Move", style=discord.ButtonStyle.success, row=3)
     async def confirm_btn(self, interaction: discord.Interaction, button: Button):
@@ -207,7 +234,7 @@ class DPadView(View):
             return await interaction.response.send_message("❌ Tap 'Select Piece' first!", ephemeral=True)
 
         sr, sc = self.game.selected_from
-        er, ec = self.game.cursor
+        er, ec = self.game.current_cursor
         success, msg = self.game.move_piece(sr, sc, er, ec)
 
         if success:
@@ -225,7 +252,38 @@ async def dama(ctx, opponent: discord.User):
     image_bytes = render_board_image(game)
     file = discord.File(fp=image_bytes, filename="dama_board.png")
     view = DPadView(game)
-    await ctx.send(f"🎮 **DAMA GAME STARTED** 🎮\n⚪ White: {ctx.author.mention}\n🔴 Red: {opponent.mention}\n\n**Current Turn:** {ctx.author.mention}\n📍 **Cursor Position:** Row 5, Col 0", file=file, view=view)
+    await ctx.send(f"🎮 **DAMA GAME STARTED** 🎮\n⚪ White: {ctx.author.mention}\n🔴 Red: {opponent.mention}\n\n**Current Turn:** {ctx.author.mention}", file=file, view=view)
+
+# --- AI CHAT RESPONSE LISTENER ---
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    bot_mentioned = bot.user in message.mentions
+    is_reply = False
+    if message.reference:
+        referenced_msg = await message.channel.fetch_message(message.reference.message_id)
+        if referenced_msg.author == bot.user:
+            is_reply = True
+
+    if (bot_mentioned or is_reply) and not message.content.startswith("!"):
+        if ai_client:
+            async with message.channel.typing():
+                clean_content = message.content.replace(f"<@{bot.user.id}>", "").strip()
+                try:
+                    response = ai_client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=clean_content or "Hello!",
+                        config={"system_instruction": SYSTEM_INSTRUCTION}
+                    )
+                    await message.reply(response.text)
+                except Exception as e:
+                    await message.reply("Wallah my brain went foggy for a second, ask me again kake!")
+        else:
+            await message.reply("Add `GEMINI_API_KEY` to my environment variables so I can talk!")
+
+    await bot.process_commands(message)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
 
