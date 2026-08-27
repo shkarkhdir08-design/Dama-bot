@@ -7,6 +7,8 @@ from PIL import Image, ImageDraw
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from google import genai
+from google.genai import types
+
 
 # --- HEALTH CHECK FOR RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -275,10 +277,13 @@ async def on_message(message):
                     response = ai_client.models.generate_content(
                         model="gemini-2.5-flash",
                         contents=clean_content or "Hello!",
-                        config={"system_instruction": SYSTEM_INSTRUCTION}
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_INSTRUCTION
+                        )
                     )
                     await message.reply(response.text)
                 except Exception as e:
+                    print(f"Error: {e}")
                     await message.reply("Wallah my brain went foggy for a second, ask me again kake!")
         else:
             await message.reply("Add `GEMINI_API_KEY` to my environment variables so I can talk!")
