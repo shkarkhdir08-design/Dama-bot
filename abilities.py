@@ -20,6 +20,7 @@ WISDOM_QUOTES = [
 TEA_TYPES = ["Peshmerga-style strong black tea ☕", "Cardamom tea ☕", "Saffron tea ☕"]
 
 # --- YOUTUBE-DLP & FFMPEG CONFIGURATION ---
+
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'extractaudio': True,
@@ -33,12 +34,12 @@ YTDL_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0'
-}
-
-FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
+    'source_address': '0.0.0.0',
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'ios']
+        }
+    }
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
