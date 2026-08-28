@@ -4,4 +4,4 @@ Pillow
 yt-dlp
 pynacl
 static-ffmpeg
-
+flask

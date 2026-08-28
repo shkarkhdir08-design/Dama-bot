@@ -1,8 +1,21 @@
 import os
+import threading
+from flask import Flask
 import discord
 from discord.ext import commands
 from mam_hassan import generate_response, should_respond
 from abilities import setup_abilities
+
+# --- Dummy Web Server to satisfy Render Port Detection ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+# --------------------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -36,6 +49,9 @@ async def on_message(message):
     await bot.process_commands(message)
 
 if __name__ == "__main__":
+    # Start the dummy web server thread before running the bot
+    threading.Thread(target=run_flask, daemon=True).start()
+
     token = os.getenv("DISCORD_TOKEN")
     if token:
         bot.run(token)
