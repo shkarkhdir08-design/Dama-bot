@@ -36,10 +36,9 @@ async def generate_response(user_input: str) -> str:
         return "Wallah you forgot to give me my `GEMINI_API_KEY` key on Render, kake!"
         
     try:
-        # Client initialization inside request ensures key updates dynamically
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=user_input or "Hello!",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION
