@@ -4,10 +4,10 @@ import asyncio
 import discord
 from discord.ext import commands
 import yt_dlp
-import static_ffmpeg  # Add this line
+import static_ffmpeg
 
-static_ffmpeg.add_paths()  # Add this line to load FFmpeg executable automatically
-
+# Initialize pre-compiled FFmpeg paths dynamically
+static_ffmpeg.add_paths()
 
 # --- WISDOM & TEA DATA ---
 WISDOM_QUOTES = [
@@ -19,7 +19,7 @@ WISDOM_QUOTES = [
 
 TEA_TYPES = ["Peshmerga-style strong black tea ☕", "Cardamom tea ☕", "Saffron tea ☕"]
 
-# --- YOUTUBE-DLP & FFMEPG MUSIC CONFIGURATION ---
+# --- YOUTUBE-DLP & FFMPEG CONFIGURATION ---
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'extractaudio': True,
@@ -62,16 +62,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
 
 # --- USER NICKNAME MEMORY STORE ---
-# Stores dynamically assigned Kurdish nicknames based on chat style
 USER_NICKNAMES = {}
 
 def assign_kurdish_nickname(user_id: int, interaction_style: str = "neutral") -> str:
-    """ Assigns or retrieves a dynamic Kurdish nickname for frequent chatters. """
     if user_id in USER_NICKNAMES:
         return USER_NICKNAMES[user_id]
     
-    # Dynamic selection based on vibe
-    polite_nicks = ["Kakî Delal (Dear Brother)", "Gula Ser Dilan (Flower of Hearts)", "Dostê Piştrast (Trutworthy Friend)"]
+    polite_nicks = ["Kakî Delal (Dear Brother)", "Gula Ser Dilan (Flower of Hearts)", "Dostê Piştrast (Trustworthy Friend)"]
     funny_nicks = ["Serqeşmer (Joker / Playful One)", "Şêrê Ser Taktê (King of the Table)", "Serreq (Stubborn One)"]
     casual_nicks = ["Kuri Qoz (Handsome Lad)", "Ganjo (Youngster)", "Bra Biçuk (Little Brother)"]
 
@@ -85,14 +82,12 @@ def assign_kurdish_nickname(user_id: int, interaction_style: str = "neutral") ->
     USER_NICKNAMES[user_id] = nick
     return nick
 
-# --- SETUP ALL ABILITIES ---
+# --- SETUP DISCORD BOT ABILITIES ---
 def setup_abilities(bot: commands.Bot):
 
-    # 1. WELCOMING NEW MEMBERS
+    # 1. WELCOME NEW MEMBERS
     @bot.event
     async def on_member_join(member):
-        """ Automatically welcomes new server members in Kurdish/English style. """
-        # Attempts to find the primary system text channel
         channel = member.guild.system_channel
         if channel and channel.permissions_for(member.guild.me).send_messages:
             welcome_msgs = [
@@ -102,8 +97,8 @@ def setup_abilities(bot: commands.Bot):
             ]
             await channel.send(random.choice(welcome_msgs))
 
-    # 2. VOICE & MUSIC COMMANDS (Play, Join, Leave, Stop)
-        @bot.command(name="join")
+    # 2. VOICE & MUSIC COMMANDS
+    @bot.command(name="join")
     async def join_vc(ctx):
         """ Joins the user's current Voice Channel. """
         if not ctx.author.voice:
@@ -126,7 +121,6 @@ def setup_abilities(bot: commands.Bot):
         if not ctx.author.voice:
             return await ctx.send("You need to be in a Voice Channel to play music, brakam!")
 
-        # Auto-connect if not connected
         if not ctx.voice_client:
             try:
                 await ctx.author.voice.channel.connect(timeout=60.0, reconnect=True)
@@ -167,7 +161,6 @@ def setup_abilities(bot: commands.Bot):
     # 3. EXTRA UTILITY COMMANDS
     @bot.command(name="nickname")
     async def get_my_nickname(ctx):
-        """ Shows your official Kurdish nickname given by Mam Hassan. """
         nick = assign_kurdish_nickname(ctx.author.id)
         await ctx.send(f"To me, you will always be **{nick}**, {ctx.author.mention}!")
 
@@ -181,3 +174,4 @@ def setup_abilities(bot: commands.Bot):
         target = member or ctx.author
         tea = random.choice(TEA_TYPES)
         await ctx.send(f"Here, {target.mention}, sit down and take a cup of {tea}. Drink up, giyan!")
+
