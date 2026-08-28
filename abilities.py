@@ -4,6 +4,10 @@ import asyncio
 import discord
 from discord.ext import commands
 import yt_dlp
+import static_ffmpeg  # Add this line
+
+static_ffmpeg.add_paths()  # Add this line to load FFmpeg executable automatically
+
 
 # --- WISDOM & TEA DATA ---
 WISDOM_QUOTES = [
