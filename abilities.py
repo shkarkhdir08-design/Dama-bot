@@ -103,17 +103,22 @@ def setup_abilities(bot: commands.Bot):
             await channel.send(random.choice(welcome_msgs))
 
     # 2. VOICE & MUSIC COMMANDS (Play, Join, Leave, Stop)
-    @bot.command(name="join")
+        @bot.command(name="join")
     async def join_vc(ctx):
         """ Joins the user's current Voice Channel. """
         if not ctx.author.voice:
             return await ctx.send("Wallah you are not in a voice channel, kake! Join one first.")
+        
         channel = ctx.author.voice.channel
-        if ctx.voice_client:
-            await ctx.voice_client.move_to(channel)
-        else:
-            await channel.connect()
-        await ctx.send(f"🔊 Joined **{channel.name}**! What song are we listening to today, ganjo?")
+        try:
+            if ctx.voice_client:
+                await ctx.voice_client.move_to(channel)
+            else:
+                await channel.connect(timeout=60.0, reconnect=True)
+            await ctx.send(f"🔊 Joined **{channel.name}**! What song are we listening to today, ganjo?")
+        except Exception as e:
+            print(f"Voice Join Error: {e}")
+            await ctx.send(f"Wallah I couldn't step into the voice room! Error: {e}")
 
     @bot.command(name="play")
     async def play_music(ctx, *, search_query: str):
@@ -121,14 +126,17 @@ def setup_abilities(bot: commands.Bot):
         if not ctx.author.voice:
             return await ctx.send("You need to be in a Voice Channel to play music, brakam!")
 
+        # Auto-connect if not connected
         if not ctx.voice_client:
-            await ctx.author.voice.channel.connect()
+            try:
+                await ctx.author.voice.channel.connect(timeout=60.0, reconnect=True)
+            except Exception as e:
+                return await ctx.send(f"Could not connect to voice channel: {e}")
 
         async with ctx.typing():
             try:
                 player = await YTDLSource.from_url(search_query, loop=bot.loop, stream=True)
                 
-                # Auto-recovery if audio is currently playing
                 if ctx.voice_client.is_playing():
                     ctx.voice_client.stop()
 
@@ -136,7 +144,7 @@ def setup_abilities(bot: commands.Bot):
                 await ctx.send(f"🎶 **Now Playing:** {player.title}\nEnjoy the music, giyan!")
             except Exception as e:
                 print(f"Music error: {e}")
-                await ctx.send("Wallah I couldn't stream that track, try searching with another song name, kake!")
+                await ctx.send(f"Wallah I couldn't stream that track! Details: {e}")
 
     @bot.command(name="stop")
     async def stop_music(ctx):
