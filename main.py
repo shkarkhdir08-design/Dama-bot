@@ -6,7 +6,6 @@ from discord.ext import commands
 from mam_hassan import generate_response, should_respond
 from abilities import setup_abilities
 
-# --- Dummy Web Server to satisfy Render Port Detection ---
 app = Flask('')
 
 @app.route('/')
@@ -15,7 +14,6 @@ def home():
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
-# --------------------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -34,7 +32,6 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Check if the message is intended for Mam Hassan chat persona
     is_reply = False
     if message.reference and message.reference.resolved:
         if message.reference.resolved.author.id == bot.user.id:
@@ -45,11 +42,9 @@ async def on_message(message):
             reply = await generate_response(message.content)
             await message.reply(reply)
 
-    # Process standard prefix commands (!play, !leave, etc.)
     await bot.process_commands(message)
 
 if __name__ == "__main__":
-    # Start the dummy web server thread before running the bot
     threading.Thread(target=run_flask, daemon=True).start()
 
     token = os.getenv("DISCORD_TOKEN")

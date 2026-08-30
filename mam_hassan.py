@@ -1,4 +1,5 @@
 import os
+import random
 from google import genai
 from google.genai import types
 
@@ -15,6 +16,13 @@ SYSTEM_INSTRUCTION = (
     "- 'Wallah', 'Spas', 'Choni', 'Bale'\n"
     "Be wise when given deep questions, but keep your everyday chat playful, warm, and grandpaternal."
 )
+
+FALLBACK_RESPONSES = [
+    "Wallah give me a second, ganjo, my tea is boiling over! ☕",
+    "Slow down, brakam! An old man can only text so fast. Ask me again in a moment.",
+    "Hold your horses, kake! Mam Hassan is taking a sip of chai.",
+    "Choni! Everyone is talking at once, let my mind catch up for a second, giyan."
+]
 
 def should_respond(message_content: str, bot_user_id: int, mentions: list, is_reply: bool) -> bool:
     """ Checks if Mam Hassan should trigger a response. """
@@ -46,6 +54,12 @@ async def generate_response(user_input: str) -> str:
         )
         return response.text
     except Exception as e:
-        print(f"⚠️ Gemini API Error Details: {e}")
-        return f"Wallah my brain went foggy! Error: {e}"
+        error_str = str(e)
+        print(f"⚠️ Gemini API Error Details: {error_str}")
+        
+        # Friendly rate limit handling instead of raw code crashes
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            return random.choice(FALLBACK_RESPONSES)
+            
+        return "Wallah my mind took a quick rest! Ask me again in a second, kake."
 

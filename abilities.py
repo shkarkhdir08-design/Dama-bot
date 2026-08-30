@@ -20,7 +20,6 @@ WISDOM_QUOTES = [
 TEA_TYPES = ["Peshmerga-style strong black tea ☕", "Cardamom tea ☕", "Saffron tea ☕"]
 
 # --- YOUTUBE-DLP & FFMPEG CONFIGURATION ---
-
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'extractaudio': True,
@@ -40,6 +39,11 @@ YTDL_OPTIONS = {
             'player_client': ['android', 'ios']
         }
     }
+}
+
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
@@ -175,4 +179,23 @@ def setup_abilities(bot: commands.Bot):
         target = member or ctx.author
         tea = random.choice(TEA_TYPES)
         await ctx.send(f"Here, {target.mention}, sit down and take a cup of {tea}. Drink up, giyan!")
+
+    # 4. DAMA (CHECKERS) COMMAND
+    @bot.command(name="dama")
+    async def dama_cmd(ctx, opponent: discord.Member = None):
+        """ Starts a game of Kurdish Dama / Checkers. """
+        if opponent is None:
+            return await ctx.send("Wallah ganjo, you need to challenge someone! Use: `!dama @username`")
+        
+        if opponent.id == ctx.author.id:
+            return await ctx.send("You cannot play Dama against yourself, kake! Challenge a friend.")
+            
+        if opponent.bot:
+            return await ctx.send("Playing Dama against a bot? Let a real human face your skills first, brakam!")
+
+        await ctx.send(
+            f"🎲 **Dama Game Started!** 🎲\n"
+            f"{ctx.author.mention} has challenged {opponent.mention} to a match of Kurdish Dama!\n"
+            f"Mam Hassan is pouring the tea while watching the board ☕. Good luck!"
+        )
 
